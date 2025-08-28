@@ -1,0 +1,151 @@
+// Raffinement du maillage
+real nh = 2;
+
+// Création des bordures
+border ba(t=0, 1){x=t; y=0; label=1;}
+border bb(t=0, 1){x=1+t; y=-t; label=1;}
+border bc(t=0, 0.3){x=2+t; y=-1+t; label=2;}
+border bd(t=0, 0.9){x=2.3-t; y=-0.7+t; label=1;}
+border be(t=0, 0.8){x=1.4+t; y=0.2+t; label=1;}
+border bf(t=0,0.2){x=2.2-t; y=1+t; label=3;}
+border bg(t=0,0.8){x=2-t; y=1.2-t; label=1;}
+border bh(t=0,1.2){x=1.2-t; y=0.4; label=1;}
+border bi(t=0,0.4){x=0; y=0.4-t; label=4;}
+
+// Gamma_1 : label = 3
+// Gamma_2 : label = 2
+// Gamma_in : label = 4
+// Gamma_Wall : label = 1
+
+
+// Création + Affichage du maillage
+mesh Th = buildmesh(ba(10*nh) + bb(10*nh) + bc(5*nh)
++ bd(10*nh) + be(10*nh) + bf(5*nh) + bg(10*nh) + bh(10*nh) + bi(5*nh) );
+
+plot(Th, wait=1);
+
+// Choix des espaces elements finis
+
+fespace Vh(Th,[P2,P2,P1]);
+fespace VhStock(Th, P2);
+
+Vh [ux, uy, p], [vx, vy, q];
+VhStock uxStock, uyStock;
+
+
+// Initialisation des constantes / fonctions
+real rho = 1;
+real mu = 0.035;
+real T = 8;
+real pd = 8*13332.2;
+real rd1 = 100;
+real rd2 = 800;
+real dt = 0.05;
+real long2 = 0.3;
+real long1 = 0.2;
+real longin = 0.4;
+real t = 0;
+
+func real g(real t) {
+    // Fait le modulo
+    real tbis = fmod(t, 0.8);
+    if (tbis > 0.4)
+        return 0;
+    return 1000*sin(pi*tbis/0.4);
+}
+
+func real uinx(real t) {
+    return g(t)*(0.4-y)*y;
+}
+
+
+func real mini(real xx, real yy) {
+    if (xx*N.x + yy*N.y > 0)
+        return 0;
+    else 
+        return xx*N.x + yy*N.y;
+}
+
+// Création du problème 
+problem Q6 ([ux,uy,p],[vx,vy,q]) = int2d(Th)(rho/dt*(ux*vx + uy*vy))
+                                 - int2d(Th)(rho/dt*(uxStock*vx + uyStock*vy))
+                                 + int2d(Th)(rho * (uxStock * (vx*dx(ux)+vy*dy(ux)) + uyStock * (vx*dx(uy)+vy*dy(uy))))      // Terme convectif
+                                 + int2d(Th)(mu/2 * (4*dx(ux)*dx(vx) + 2*(dy(ux)+dx(uy))*(dy(vx)+dx(vy)) + 4*dy(uy)*dy(vy))) // Terme epsilon(u):epsilon(v)
+                                 - int2d(Th)(p*(dx(vx)+dy(vy)))
+                                 + int2d(Th)(q*(dx(ux)+dy(uy)))
+                                 
+                                 // Neumann sur le bord
+                             
+                                 + int1d(Th,2)(pd*(N.x*vx+N.y*vy) + rd2*int1d(Th,2)(uxStock*N.x+uyStock*N.y)*(vx*N.x+vy*N.y))
+                                 - int1d(Th,2)(rho/2*mini(uxStock,uyStock)*(ux*vx+uy*vy))
+                                 + int1d(Th,2)(rd2*long2/2*(vx*N.x+vy*N.y)*(ux*N.x+uy*N.y))
+                                 - int1d(Th,2)(rd2*long2/2*(vx*N.x+vy*N.y)*(uxStock*N.x+uyStock*N.y))
+                                 
+                                 + int1d(Th,3)(pd*(N.x*vx+N.y*vy) + rd1*int1d(Th,3)(uxStock*N.x+uyStock*N.y)*(vx*N.x+vy*N.y))
+                                 - int1d(Th,3)(rho/2*mini(uxStock,uyStock)*(ux*vx+uy*vy))
+                                 + int1d(Th,3)(rd1*long1/2*(vx*N.x+vy*N.y)*(ux*N.x+uy*N.y))
+                                 - int1d(Th,3)(rd1*long1/2*(vx*N.x+vy*N.y)*(uxStock*N.x+uyStock*N.y))
+                                 
+                                 // Condition de Dirichlet
+                                 + on(1, ux=0,uy=0) + on(4, ux = uinx(t), uy=0); // Entrée constante 
+
+int n = int(8/dt);
+real[int] temps(n), pin(n), p1(n), p2(n), fin(n), f1(n), f2(n);
+
+for (int i = 0; i<int(8/dt); i++){
+    Q6;
+    plot([ux,uy], wait=1, fill=1, value=1, cmm="Vitesse pour t = " + t);
+    // plot(p, wait=1, fill=1, value=1, cmm="Pression pour t = " + t);
+    
+    temps[i] = t;
+    pin[i] = int1d(Th,4)(p/longin);
+    p1[i] = int1d(Th,3)(p/long1);
+    p2[i] = int1d(Th,2)(p/long2);
+    fin[i] = int1d(Th,4)(ux*N.x+uy*N.y);
+    f1[i] = int1d(Th,3)(ux*N.x+uy*N.y);
+    f2[i] = int1d(Th,2)(ux*N.x+uy*N.y);
+    
+    t+=dt;   
+}
+
+{
+  string pressionin = "pression_in.gp";
+  ofstream gnu(pressionin);	
+  for (int i=0;i<n; ++i)
+    gnu << temps[i] << " " << pin[i] << endl;
+}
+
+{
+  string pression1 = "pression_1.gp";
+  ofstream gnu(pression1);	
+  for (int i=0;i<n; ++i)
+    gnu << temps[i] << " " << p1[i] << endl;
+}
+
+{
+  string pression2 = "pression_2.gp";
+  ofstream gnu(pression2);	
+  for (int i=0;i<n; ++i)
+    gnu << temps[i] << " " << p2[i] << endl;
+}
+
+{
+  string fluxin = "flux_in.gp";
+  ofstream gnu(fluxin);	
+  for (int i=0;i<n; ++i)
+    gnu << temps[i] << " " << fin[i] << endl;
+}
+
+{
+  string flux1 = "flux_1.gp";
+  ofstream gnu(flux1);	
+  for (int i=0;i<n; ++i)
+    gnu << temps[i] << " " << f1[i] << endl;
+}
+
+{
+  string flux2 = "flux_2.gp";
+  ofstream gnu(flux2);	
+  for (int i=0;i<n; ++i)
+    gnu << temps[i] << " " << f2[i] << endl;
+}
